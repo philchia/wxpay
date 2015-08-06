@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 )
 
@@ -32,36 +33,41 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Submit the order to weixin pay and return the prepay id if success,
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
-func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string) (string, error) {
+func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string) (string, string, error) {
 
 	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp)
+	log.Println(odrInXml)
 	resp, err := doHttpPost(this.Config.PlaceOrderUrl, []byte(odrInXml))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	placeOrderResult, err := ParsePlaceOrderResult(resp)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	//Verify the sign of response
 	resultInMap := placeOrderResult.ToMap()
+	log.Println("Prepay_id")
+	log.Println(placeOrderResult.PrepayId)
+	log.Println("result map")
+	log.Println(resultInMap)
 	wantSign := Sign(resultInMap, this.Config.AppKey)
 	gotSign := resultInMap["sign"]
 	if wantSign != gotSign {
-		return "", fmt.Errorf("sign not match, want:%s, got:%s", wantSign, gotSign)
+		return "", "", fmt.Errorf("sign not match, want:%s, got:%s", wantSign, gotSign)
 	}
 
 	if placeOrderResult.ReturnCode != "SUCCESS" {
-		return "", fmt.Errorf("return code:%s, return desc:%s", placeOrderResult.ReturnCode, placeOrderResult.ReturnMsg)
+		return "", "", fmt.Errorf("return code:%s, return desc:%s", placeOrderResult.ReturnCode, placeOrderResult.ReturnMsg)
 	}
 
 	if placeOrderResult.ResultCode != "SUCCESS" {
-		return "", fmt.Errorf("resutl code:%s, result desc:%s", placeOrderResult.ErrCode, placeOrderResult.ErrCodeDesc)
+		return "", "", fmt.Errorf("resutl code:%s, result desc:%s", placeOrderResult.ErrCode, placeOrderResult.ErrCodeDesc)
 	}
 
-	return placeOrderResult.PrepayId, nil
+	return placeOrderResult.PrepayId, placeOrderResult.NonceStr, nil
 }
 
 func (this *AppTrans) newQueryXml(transId string) string {
@@ -106,28 +112,19 @@ func (this *AppTrans) Query(transId string) (QueryOrderResult, error) {
 
 // NewPaymentRequest build the payment request structure for app to start a payment.
 // Return stuct of PaymentRequest, please refer to http://pay.weixin.qq.com/wiki/doc/api/app.php?chapter=9_12&index=2
-func (this *AppTrans) NewPaymentRequest(prepayId string) PaymentRequest {
+func (this *AppTrans) NewPaymentRequest(prepayId, nonceString string) map[string]string {
 	param := make(map[string]string)
 	param["appid"] = this.Config.AppId
 	param["partnerid"] = this.Config.MchId
 	param["prepayid"] = prepayId
 	param["package"] = "Sign=WXPay"
-	param["noncestr"] = NewNonceString()
+	param["noncestr"] = nonceString
 	param["timestamp"] = NewTimestampString()
 
 	sign := Sign(param, this.Config.AppKey)
+	param["sign"] = sign
 
-	payRequest := PaymentRequest{
-		AppId:     this.Config.AppId,
-		PartnerId: this.Config.MchId,
-		PrepayId:  prepayId,
-		Package:   "Sign=WXPay",
-		NonceStr:  NewNonceString(),
-		Timestamp: NewTimestampString(),
-		Sign:      sign,
-	}
-
-	return payRequest
+	return param
 }
 
 func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp string) map[string]string {
@@ -149,7 +146,7 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp string) ma
 func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp string) string {
 	order := this.newOrderRequest(orderId, amount, desc, clientIp)
 	sign := Sign(order, this.Config.AppKey)
-	// fmt.Println(sign)
+	log.Println(sign)
 
 	order["sign"] = sign
 

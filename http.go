@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 )
@@ -34,7 +35,6 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Submit the order to weixin pay and return the prepay id if success,
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
-func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type string, openid string) (string, string, error) {
 
 	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp, trade_type, openid)
 
@@ -50,6 +50,10 @@ func (this *AppTrans) Submit(orderId string, amount float64, desc string, client
 
 	//Verify the sign of response
 	resultInMap := placeOrderResult.ToMap()
+	log.Println("Prepay_id")
+	log.Println(placeOrderResult.PrepayId)
+	log.Println("result map")
+	log.Println(resultInMap)
 	wantSign := Sign(resultInMap, this.Config.AppKey)
 	gotSign := resultInMap["sign"]
 	if wantSign != gotSign {
@@ -125,7 +129,6 @@ func (this *AppTrans) NewPaymentRequest(prepayId, trade_type string) map[string]
 		param["package"] = "prepay_id=" + prepayId
 		param["signType"] = "MD5"
 	}
-
 	sign := Sign(param, this.Config.AppKey)
 	param["sign"] = sign
 
@@ -156,7 +159,7 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_typ
 func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp, trade_type, openid string) string {
 	order := this.newOrderRequest(orderId, amount, desc, clientIp, trade_type, openid)
 	sign := Sign(order, this.Config.AppKey)
-	// fmt.Println(sign)
+	log.Println(sign)
 
 	order["sign"] = sign
 

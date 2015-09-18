@@ -33,7 +33,7 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Submit the order to weixin pay and return the prepay id if success,
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
-func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string) (string, string, error) {
+func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type string, openid string) (string, string, error) {
 
 	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp)
 	log.Println(odrInXml)
@@ -112,7 +112,7 @@ func (this *AppTrans) Query(transId string) (QueryOrderResult, error) {
 
 // NewPaymentRequest build the payment request structure for app to start a payment.
 // Return stuct of PaymentRequest, please refer to http://pay.weixin.qq.com/wiki/doc/api/app.php?chapter=9_12&index=2
-func (this *AppTrans) NewPaymentRequest(prepayId, nonceString string) map[string]string {
+func (this *AppTrans) NewPaymentRequest(prepayId, codeUrl, nonceString string) map[string]string {
 	param := make(map[string]string)
 	param["appid"] = this.Config.AppId
 	param["partnerid"] = this.Config.MchId
@@ -123,6 +123,7 @@ func (this *AppTrans) NewPaymentRequest(prepayId, nonceString string) map[string
 
 	sign := Sign(param, this.Config.AppKey)
 	param["sign"] = sign
+	param["codeUrl"] = codeUrl
 
 	return param
 }

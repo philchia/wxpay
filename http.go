@@ -3,10 +3,12 @@ package wxpay
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 )
 
 // AppTrans is abstact of Transaction handler. With AppTrans, we can get prepay id
@@ -32,17 +34,18 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Submit the order to weixin pay and return the prepay id if success,
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
-func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string) (string, error) {
+func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type string, openid string) (string, string, error) {
 
-	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp)
+	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp, trade_type, openid)
+
 	resp, err := doHttpPost(this.Config.PlaceOrderUrl, []byte(odrInXml))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	placeOrderResult, err := ParsePlaceOrderResult(resp)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	//Verify the sign of response
@@ -50,18 +53,18 @@ func (this *AppTrans) Submit(orderId string, amount float64, desc string, client
 	wantSign := Sign(resultInMap, this.Config.AppKey)
 	gotSign := resultInMap["sign"]
 	if wantSign != gotSign {
-		return "", fmt.Errorf("sign not match, want:%s, got:%s", wantSign, gotSign)
+		return "", "", fmt.Errorf("sign not match, want:%s, got:%s", wantSign, gotSign)
 	}
 
 	if placeOrderResult.ReturnCode != "SUCCESS" {
-		return "", fmt.Errorf("return code:%s, return desc:%s", placeOrderResult.ReturnCode, placeOrderResult.ReturnMsg)
+		return "", "", fmt.Errorf("return code:%s, return desc:%s", placeOrderResult.ReturnCode, placeOrderResult.ReturnMsg)
 	}
 
 	if placeOrderResult.ResultCode != "SUCCESS" {
-		return "", fmt.Errorf("resutl code:%s, result desc:%s", placeOrderResult.ErrCode, placeOrderResult.ErrCodeDesc)
+		return "", "", fmt.Errorf("resutl code:%s, result desc:%s", placeOrderResult.ErrCode, placeOrderResult.ErrCodeDesc)
 	}
 
-	return placeOrderResult.PrepayId, nil
+	return placeOrderResult.PrepayId, placeOrderResult.CodeUrl, nil
 }
 
 func (this *AppTrans) newQueryXml(transId string) string {
@@ -106,31 +109,30 @@ func (this *AppTrans) Query(transId string) (QueryOrderResult, error) {
 
 // NewPaymentRequest build the payment request structure for app to start a payment.
 // Return stuct of PaymentRequest, please refer to http://pay.weixin.qq.com/wiki/doc/api/app.php?chapter=9_12&index=2
-func (this *AppTrans) NewPaymentRequest(prepayId string) PaymentRequest {
+func (this *AppTrans) NewPaymentRequest(prepayId, trade_type string) map[string]string {
 	param := make(map[string]string)
-	param["appid"] = this.Config.AppId
-	param["partnerid"] = this.Config.MchId
-	param["prepayid"] = prepayId
-	param["package"] = "Sign=WXPay"
-	param["noncestr"] = NewNonceString()
-	param["timestamp"] = NewTimestampString()
-
-	sign := Sign(param, this.Config.AppKey)
-
-	payRequest := PaymentRequest{
-		AppId:     this.Config.AppId,
-		PartnerId: this.Config.MchId,
-		PrepayId:  prepayId,
-		Package:   "Sign=WXPay",
-		NonceStr:  NewNonceString(),
-		Timestamp: NewTimestampString(),
-		Sign:      sign,
+	if trade_type == "APP" {
+		param["appid"] = this.Config.AppId
+		param["package"] = "Sign=WXPay"
+		param["partnerid"] = this.Config.MchId
+		param["prepayid"] = prepayId
+		param["noncestr"] = NewNonceString()
+		param["timestamp"] = NewTimestampString()
+	} else {
+		param["appId"] = this.Config.AppId
+		param["timeStamp"] = NewTimestampString()
+		param["nonceStr"] = NewNonceString()
+		param["package"] = "prepay_id=" + prepayId
+		param["signType"] = "MD5"
 	}
 
-	return payRequest
+	sign := Sign(param, this.Config.AppKey)
+	param["sign"] = sign
+
+	return param
 }
 
-func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp string) map[string]string {
+func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_type string, openid string) map[string]string {
 	param := make(map[string]string)
 	param["appid"] = this.Config.AppId
 	param["attach"] = "透传字段" //optional
@@ -141,13 +143,18 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp string) ma
 	param["out_trade_no"] = orderId
 	param["spbill_create_ip"] = clientIp
 	param["total_fee"] = amount
-	param["trade_type"] = "APP"
+	if trade_type == "APP" {
+		param["trade_type"] = "APP"
+	} else {
+		param["trade_type"] = "JSAPI"
+		param["openid"] = openid
+	}
 
 	return param
 }
 
-func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp string) string {
-	order := this.newOrderRequest(orderId, amount, desc, clientIp)
+func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp, trade_type, openid string) string {
+	order := this.newOrderRequest(orderId, amount, desc, clientIp, trade_type, openid)
 	sign := Sign(order, this.Config.AppKey)
 	// fmt.Println(sign)
 
@@ -181,4 +188,70 @@ func doHttpPost(targetUrl string, body []byte) ([]byte, error) {
 	}
 
 	return respData, nil
+}
+
+// get请求
+func doHttpGet(targetUrl string, params map[string]string) ([]byte, error) {
+	u, err := url.Parse(targetUrl)
+
+	if err != nil {
+		return []byte(""), err
+	}
+
+	q := u.Query()
+
+	for k, v := range params {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+
+	resp, err := http.Get(u.String())
+	if err != nil {
+		return []byte(""), err
+	}
+
+	result, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return []byte(""), err
+	}
+
+	resp.Body.Close()
+
+	return result, nil
+}
+
+// 根据授权code获取openid  jsapi用
+func (this *AppTrans) GetOpenID(param map[string]string) (string, error) {
+
+	res, err := doHttpGet("https://api.weixin.qq.com/sns/oauth2/access_token", param)
+	if err != nil {
+		return "", err
+	}
+
+	// json string to map
+	m, err := JsonStrToMap(string(res))
+
+	if err != nil {
+		return "", err
+	}
+
+	// get openid
+	openid := ""
+	if s, ok := m["openid"].(string); ok {
+		openid = s
+	}
+	return openid, nil
+
+}
+
+// json转map
+func JsonStrToMap(str string) (map[string]interface{}, error) {
+	m := make(map[string]interface{})
+
+	err := json.Unmarshal([]byte(str), &m)
+
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }

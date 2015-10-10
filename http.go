@@ -147,7 +147,7 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_typ
 		param["trade_type"] = "APP"
 	} else if trade_type == "NATIVE" {
 		param["trade_type"] = "NATIVE"
-		param["product_id"] = ""
+		param["product_id"] = productid
 	} else {
 		param["trade_type"] = "JSAPI"
 		param["openid"] = openid

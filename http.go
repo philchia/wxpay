@@ -35,7 +35,6 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
 func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type, productid, openid string) (string, string, error) {
-
 	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp, trade_type, productid, openid)
 
 	resp, err := doHttpPost(this.Config.PlaceOrderUrl, []byte(odrInXml))

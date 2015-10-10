@@ -34,9 +34,9 @@ func NewAppTrans(cfg *WxConfig) (*AppTrans, error) {
 // Submit the order to weixin pay and return the prepay id if success,
 // Prepay id is used for app to start a payment
 // If fail, error is not nil, check error for more information
-func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type string, openid string) (string, string, error) {
+func (this *AppTrans) Submit(orderId string, amount float64, desc string, clientIp string, trade_type, productid, openid string) (string, string, error) {
 
-	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp, trade_type, openid)
+	odrInXml := this.signedOrderRequestXmlString(orderId, fmt.Sprintf("%.0f", amount), desc, clientIp, trade_type, productid, openid)
 
 	resp, err := doHttpPost(this.Config.PlaceOrderUrl, []byte(odrInXml))
 	if err != nil {
@@ -132,7 +132,7 @@ func (this *AppTrans) NewPaymentRequest(prepayId, codeURl, trade_type string) ma
 	return param
 }
 
-func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_type string, openid string) map[string]string {
+func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_type, productid, openid string) map[string]string {
 	param := make(map[string]string)
 	param["appid"] = this.Config.AppId
 	param["attach"] = "透传字段" //optional
@@ -145,6 +145,9 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_typ
 	param["total_fee"] = amount
 	if trade_type == "APP" {
 		param["trade_type"] = "APP"
+	} else if trade_type == "NATIVE" {
+		param["trade_type"] = "NATIVE"
+		param["product_id"] = ""
 	} else {
 		param["trade_type"] = "JSAPI"
 		param["openid"] = openid
@@ -153,8 +156,8 @@ func (this *AppTrans) newOrderRequest(orderId, amount, desc, clientIp, trade_typ
 	return param
 }
 
-func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp, trade_type, openid string) string {
-	order := this.newOrderRequest(orderId, amount, desc, clientIp, trade_type, openid)
+func (this *AppTrans) signedOrderRequestXmlString(orderId, amount, desc, clientIp, trade_type, productid, openid string) string {
+	order := this.newOrderRequest(orderId, amount, desc, clientIp, trade_type, productid, openid)
 	sign := Sign(order, this.Config.AppKey)
 	// fmt.Println(sign)
 
